@@ -1,9 +1,9 @@
 Action: train
 download_data : No
-train_config: {'batch_size':60,'num_epochs':25,'seq_len':150}
+train_config: {'batch_size':64,'num_epochs':25,'seq_len':150}
 # book_data_path: '../data/books_data.csv'
-experiment_name: 'ted_talk_initial'
-model_path: '../models/bert_finetune_bert_very_weak_scheduler_3e-5'
+experiment_name: 'ted_talk_bigger_lstm_3_labels_lr=5e-5_multi_dropouts'
+#model_path: '../models/ted_talk_initial'
 #text: '/home/student/Project/data/garbage.txt'
 external_dataset: ['../parsed_train_xml.txt','../parsed_dev_xml.txt','../parsed_test_xml.txt']
 from_saved: ['../data/train_dataset','../data/val_dataset','../data/test_dataset']

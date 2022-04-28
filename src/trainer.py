@@ -3,11 +3,11 @@ from utils import *
 from torch.optim import Adam
 from torch.nn import NLLLoss
 from torch.optim.lr_scheduler import ExponentialLR
-
+from predict import Predict
 
 class Trainer:
     def __init__(self, model_class, train, val, test, experiment_name, loss_fn=NLLLoss,
-                 optimizer=Adam,batch_size=16, num_epochs=25, seq_len=150, device=False):
+                 optimizer=Adam,batch_size=16, num_epochs=25, seq_len=150, device=False, predict=False):
         self.batch_size = batch_size
         self.num_epochs = num_epochs
         self.seq_len = seq_len
@@ -18,6 +18,9 @@ class Trainer:
                                                           num_workers=0)
         self.test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, shuffle=False,
                                                            num_workers=0)
+        self.train_data = train
+        self.val_data = val
+        self.test_data = test
         sample = next(iter(self.train_dataloader))
         self.model = model_class(len(annotations_embedding),
                                  {'input_ids': sample[0], 'attention_mask': sample[1]})
@@ -29,6 +32,10 @@ class Trainer:
         if not os.path.exists("../models/logs"):
             os.mkdir("../models/logs")
         self.model_path = os.path.join("../models",self.experiment_name)
+        if predict:
+            self.predict = Predict
+        else:
+            self.predict = None
         self.logging_path = os.path.join("../models/logs",f'{experiment_name}.log')
         log = logging.getLogger()
         for hdlr in log.handlers[:]:
@@ -37,11 +44,11 @@ class Trainer:
                             format='%(asctime)s - %(message)s')
         print(self.model)
 
-    def train(self,scheduler=ExponentialLR, scheduler_steps=15,patience=10,print_step=400):
+    def train(self,scheduler=ExponentialLR, scheduler_steps=30,patience=10,print_step=100):
         parameters1 = self.model.bert.parameters()
         parameters2 = [*self.model.before.parameters(), *self.model.after.parameters(), *self.model.capital.parameters(),
                        *self.model.br.parameters()]
-        optimizer1 = self.optimizer(parameters1, lr=3e-5)
+        optimizer1 = self.optimizer(parameters1, lr=5e-5)
         optimizer2 = self.optimizer(parameters2)
         if scheduler:
             scheduler1 = scheduler(optimizer1, 0.999)
@@ -60,38 +67,44 @@ class Trainer:
 
             self.model.train()
             total_loss = 0
-
-            for step, batch in enumerate(self.train_dataloader):
+            step = 0
+            for batch in tqdm(self.train_dataloader):
+                loss = 0.
                 if self.device:
                     batch = tuple(t.cuda() for t in batch)
                 input_ids, input_mask, before_l, after_l, capital_l, br_l = batch
+                labels = [before_l, after_l, capital_l, br_l]
                 self.model.zero_grad()
-                before_p, after_p, capital_p, br_p = self.model({'input_ids': input_ids,
-                                                                 'attention_mask': input_mask})
+                outputs = self.model({'input_ids': input_ids,'attention_mask': input_mask})
                 # need to swap the axes since using on a sequence, may raise issues if loss_fn isn't NLL
-                loss_be, loss_af, loss_cap, loss_br = loss_fn(before_p.swapaxes(1, -1), before_l),\
-                    loss_fn(after_p.swapaxes(1, -1), after_l),\
-                    loss_fn(capital_p.swapaxes(1, -1), capital_l),\
-                    loss_fn(br_p.swapaxes(1, -1), br_l)
-                loss = loss_be + loss_af + loss_cap + loss_br
+                for o, l in zip(outputs, labels):
+                    loss += loss_fn(o.swapaxes(1, -1), l)
+                # loss_be, loss_af, loss_cap, loss_br = loss_fn(before_p.swapaxes(1, -1), before_l),\
+                #     loss_fn(after_p.swapaxes(1, -1), after_l),\
+                #     loss_fn(capital_p.swapaxes(1, -1), capital_l),\
+                #     loss_fn(br_p.swapaxes(1, -1), br_l)
+                # loss = loss_be + loss_af + loss_cap + loss_br
                 loss.backward()
                 total_loss += loss.item()
 
-                optimizer1.step()
+                if epoch > 2:
+                    optimizer1.step()
                 optimizer2.step()
 
                 if scheduler:
                     if not step % scheduler_steps:
-                        scheduler1.step()
+                        if epoch > 2:
+                            scheduler1.step()
                         scheduler2.step()
 
                 if not step % print_step:
-                    print("#############################################################")
-                    print(f"Current step is {step}/{len(self.train_dataloader)} Current batch loss is:"
-                          f" {np.round(loss.item(), 4)}")
+                    # print("#############################################################")
+                    # print(f"Current step is {step}/{len(self.train_dataloader)} Current batch loss is:"
+                    #       f" {np.round(loss.item(), 4)}")
                     logging.info("#############################################################")
                     logging.info(f"Current step is {step}/{len(self.train_dataloader)} "
                                  f"Current batch loss is: {np.round(loss.item(), 4)}")
+                step += 1
             # Calculate the average loss over the training data.
             avg_train_loss = total_loss / (step + 1)
             print(f"Average train loss: {np.round(avg_train_loss, 4)} \n")
@@ -150,4 +163,9 @@ class Trainer:
             logging.info(f"Validation loss: {np.round(avg_eval_loss, 4)}")
             logging.info(f"Validation Accuracy: {np.round(np.array(accuracy).mean(0), 4)}")
             logging.info(f"Validation f1-score: {np.round(np.array(f1).mean(0), 4)}")
+            if self.predict is not None:
+                predictor = self.predict(self.model,self.val_data,device=True,log=True)
+                predictor.evaluate(val=True)
+                predictor = self.predict(self.model, self.test_data, device=True, log=True)
+                predictor.evaluate(val=False)
         return loss_values,validation_loss_values

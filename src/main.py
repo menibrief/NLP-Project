@@ -1,5 +1,4 @@
 import torch
-
 from utils import *
 from create_dataset import *
 from trainer import Trainer
@@ -58,7 +57,6 @@ if __name__ == "__main__":
         print('Please make sure yaml file is in the correct format or that arguments were provided')
         raise Exception
 
-
     if args['Action'] == 'train':
         if args['external_dataset'] is None and args['from_saved'] is None:
             train,val,test = create_gutenberg_dataset(args['book_data_path'],download=args['download_data'],
@@ -78,26 +76,36 @@ if __name__ == "__main__":
                 data_sets = args['external_dataset']
                 assert len(data_sets) == 3
 
-                train,val,test = create_prediction_dataset(data_sets[0]),\
+                train,val,test = create_prediction_dataset(data_sets[0],over_lap=0,times_overlap=0),\
                     create_prediction_dataset(data_sets[1]),create_prediction_dataset(data_sets[2])
                 torch.save(train, '../data/train_dataset')
                 torch.save(val, '../data/val_dataset')
                 torch.save(test, '../data/test_dataset')
-        print(f'Train size = {len(train)}, val size ={len(val)}, test size = {len(test)}')
+        print(f'Train size = {len(train)}, val size = {len(val)}, test size = {len(test)}')
         model = PunctuationModel
         trainer = Trainer(PunctuationModel,train,val,test,args['experiment_name'],**args['train_config'],
-                          device=device)
+                          device=device,predict=True)
         trainer.train()
         predictor = Predict(trainer.model,test,device=device,log=True)
         predictor.evaluate()
 
     elif args['Action'] == 'evaluate':
         model = torch.load(args['model_path'],map_location=torch.device('cpu') if not device else None)
-        if args['text'] is not None:
+        if args['from_saved'] is not None:
+            try:
+                data_sets = args['from_saved']
+                test = torch.load(data_sets[2])
+            except Exception as e:
+                print(e)
+                print('Make sure you provided datasets correctly')
+                raise Exception
+
+        elif args['text'] is not None:
             test = create_prediction_dataset(args['text'], seq_len=args['train_config']['seq_len'])
         else:
             _,_,test = create_gutenberg_dataset(args['book_data_path'],download=args['download_data'],
                                                   save_df=False,seq_len=args['train_config']['seq_len'])
+
         predictor = Predict(model, test, device=device,log=True)
         predictor.evaluate()
 

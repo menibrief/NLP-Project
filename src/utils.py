@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = "1"
+os.environ['CUDA_VISIBLE_DEVICES'] = "7"
 import torch
 import numpy as np
 import pandas as pd
@@ -18,11 +18,13 @@ warnings.filterwarnings("ignore")
 tqdm.pandas()
 torch.random.manual_seed(42)
 device = torch.cuda.is_available()
-punc = ['!', '"', "'", '(', ')', ',', '-', '.', ':', ';', '?', 'None']
-annotations_embedding = {punc[i]: i for i in range(len(punc))}
+##############################################
+# PUNC = ['!', '"', "'", '(', ')', ',', '-', '.', ':', ';', '?', 'None']
+##############################################
+PUNC = [',', '.', '?', 'None']
+annotations_embedding = {PUNC[i]: i for i in range(len(PUNC))}
 reverse_annotations_embedding = {val: key for key, val in annotations_embedding.items()}
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-
 
 
 class SentenceDataSet(torch.utils.data.Dataset):
@@ -77,32 +79,31 @@ def clean_text(text, n=50):
 
 def annotate_text(text, raw=False):
 
-    text_list = text.split(' ')
+    text = text.split(' ')
     annotations = []
-    length = len(text_list)
-    punc = ['.', ',', '!', '?', '(', ')', ':', '"', '\'', ';', '-']
+    length = len(text)
+    all_punc = ['.', ',', '!', '?', '(', ')', ':', '"', '\'', ';', '-', '<br>']
     for i in range(length):
         annotation = {'before': '', 'after': '', 'capital': '', 'break': ''}
         if raw:
             annotation = {'before': -1, 'after': -1, 'capital': -1, 'break': -1}
         else:
-            if text_list[i] in ['.', ',', '!', '?', '(', ')', ':', '"', '\'', ';', '-', '<br>'] or not \
-            text_list[i]:
+            if text[i] in all_punc or not text[i]:
                 continue
-            if i and text_list[i - 1] in punc:
-                annotation['before'] = text_list[i - 1]
+            if i and text[i - 1] in PUNC[:-1]:
+                annotation['before'] = text[i - 1]
             else:
                 annotation['before'] = 'None'
-            if i < length - 1 and text_list[i + 1] in punc:
-                annotation['after'] = text_list[i + 1]
+            if i < length - 1 and text[i + 1] in PUNC[:-1]:
+                annotation['after'] = text[i + 1]
             else:
                 annotation['after'] = 'None'
-            if text_list[i].lower() != text_list[i]:
+            if text[i].lower() != text[i]:
                 annotation['capital'] = 1
             else:
                 annotation['capital'] = 0
-            if (i < length - 1 and text_list[i + 1] == '<br>') or (
-                    i < length - 2 and text_list[i + 1] in punc and text_list[i + 2] == '<br>'):
+            if (i < length - 1 and text[i + 1] == '<br>') or (
+                    i < length - 2 and text[i + 1] in PUNC[:-1] and text[i + 2] == '<br>'):
                 annotation['break'] = 1
             else:
                 annotation['break'] = 0
@@ -138,7 +139,7 @@ def tokenize_and_preserve_labels(sentence, text_labels, tokenizer, seq_len):
 
 
 def prepare_for_batches(text, annotations, tokenizer, actual_seq_len, label_to_idx,
-                        val_percent=0.15, test_percent=0.1):
+                        val_percent=0.15, test_percent=0.1, overlap=0, times_overlap=0):
     """
     takes words, annotations and creates sequences for the model
     :param text: the raw text (after pipeline)
@@ -148,12 +149,19 @@ def prepare_for_batches(text, annotations, tokenizer, actual_seq_len, label_to_i
     :param label_to_idx: conversion of labels (char) to int
     :param val_percent: percent to use for validation
     :param test_percent: percent to use for test
+    :param overlap: number of tokens to repeat
+    :param times_overlap: number of overlapping sections
     :return: dictionary of train,val,test and their data (can be empty)
     """
     seq_len = int(0.7 * actual_seq_len)
     # create sequences
+
     sentences = [text[i:i + seq_len] for i in range(0, len(text), seq_len)]
     labels = [annotations[i:i + seq_len] for i in range(0, len(annotations), seq_len)]
+    if overlap:
+        for j in range(times_overlap):
+            sentences.extend([text[i:i + seq_len] for i in range(overlap*(j+1), len(text), seq_len)])
+            labels.extend([annotations[i:i + seq_len] for i in range(overlap*(j+1), len(annotations), seq_len)])
     # adjust to tokenizer
     adjusted = [tokenize_and_preserve_labels(sentences[i], labels[i], tokenizer, actual_seq_len)
                 for i in tqdm(range(len(sentences)))]
@@ -233,3 +241,22 @@ def get_optimal_annotation(pred_1, pred_2):
     else:
         annotations.extend([pred_1,""])
     return annotations
+
+
+def get_short_optimal_annotation(pred_1, pred_2):
+    """
+    Setup for further heuristics
+    return the best annotation- if after was predicted as nothing and before as something,
+    return the one that says something.
+    :param pred_1: prediction for after of i-1
+    :param pred_2: prediction for before of i
+    :return: best prediction
+    """
+    # pred_1 = reverse_annotations_embedding[pred_1]
+    # pred_2 = reverse_annotations_embedding[pred_2]
+    # targets = [",",".","?"]
+    # if pred_1 not in targets and pred_2 in targets:
+    #     return annotations_embedding[pred_2]
+    # else:
+    #     return annotations_embedding[pred_1]
+    return pred_1

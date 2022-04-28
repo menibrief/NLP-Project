@@ -91,7 +91,7 @@ def create_gutenberg_dataset(df_path='../data/books_data.csv',download=False, sa
     return train, val, test
 
 
-def create_prediction_dataset(text_path,raw=False, seq_len=150):
+def create_prediction_dataset(text_path,raw=False, seq_len=150,over_lap=0,times_overlap=0):
     try:
         with open(text_path, 'r') as f:
             text = f.readlines()
@@ -104,8 +104,8 @@ def create_prediction_dataset(text_path,raw=False, seq_len=150):
     text = clean_text(text, n=0)
     annotations = annotate_text(text,raw)
     raw_text = to_raw(text)
-    data = prepare_for_batches(raw_text, annotations, tokenizer,seq_len,
-                               annotations_embedding, test_percent=1)
+    data = prepare_for_batches(raw_text, annotations, tokenizer,seq_len,annotations_embedding,
+                               test_percent=1.,overlap=over_lap,times_overlap=times_overlap)
     data_set = data_to_dataset([data], seq_len, train_val=False)
     return data_set
 

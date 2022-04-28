@@ -74,7 +74,7 @@ class Predict:
         outputs = [o.detach().cpu().numpy() for o in outputs]
         return input_ids, labels, outputs
 
-    def evaluate(self):
+    def evaluate(self,val=False):
         self.model.eval()
         accuracy, f1, = [], []
         print('Evaluating on data:')
@@ -83,6 +83,7 @@ class Predict:
             # Calculate the accuracy for this batch of test sentences.
             cur_accuracy, cur_f1 = [], []
             zipped_o_l = [i for i in zip(outputs, labels)]
+            processed_zipped_o_l=[]
             for vals in range(len(zipped_o_l)):
                 o, l = zipped_o_l[vals]
                 # convert to account for added token
@@ -90,28 +91,39 @@ class Predict:
                                                       np.argmax(o, -1), tokenizer) for j in i])
                 l = np.array([j for i in ids_to_words(input_ids.cpu().numpy(),
                                                       l, tokenizer) for j in i])
+                processed_zipped_o_l.append((o,l))
+
+            optimized_1 = np.array([get_short_optimal_annotation(before,after) for before,after in
+                           zip(processed_zipped_o_l[0][0],processed_zipped_o_l[1][0])])
+            optimized_2 = np.array([get_short_optimal_annotation(after, before) for before, after in
+                           zip(processed_zipped_o_l[0][0], processed_zipped_o_l[1][0])])
+            processed_zipped_o_l[0] = (optimized_1,processed_zipped_o_l[0][1])
+            processed_zipped_o_l[1] = (optimized_2,processed_zipped_o_l[1][1])
+
+            for vals in range(len(processed_zipped_o_l)):
+                o, l = processed_zipped_o_l[vals]
                 cur_accuracy.append((np.array(o == l).sum(-1) / l.shape).mean())
                 if vals > 1:
                     cur_f1.append(f1_per_label(o, l, 2))
                 else:
-                    cur_f1.append(f1_per_label(o, l, 12))
+                    cur_f1.append(f1_per_label(o, l, len(PUNC)))
             accuracy.append(cur_accuracy)
             f1.append(cur_f1)
         print("#############################################################")
-        print(f"Test Accuracy: {np.round(np.nanmean(accuracy, 0), 4)}")
-        print(f"Test f1-score for (before, after) the following classes\n"
-              f"{punc} is:\n"
-              f"{[i for i in zip(punc, np.round(np.nanmean([i[0] for i in f1], 0), 4))]}\n"
-              f"{[i for i in zip(punc, np.round(np.nanmean([i[1] for i in f1], 0), 4))]}\n"
+        print(f"{'Val' if val else 'Test'} accuracy: {np.round(np.nanmean(accuracy, 0), 4)}")
+        print(f"{'Val' if val else 'Test'} f1-score for (before, after) the following classes\n"
+              f"{PUNC} is:\n"
+              f"{[i for i in zip(PUNC, np.round(np.nanmean([i[0] for i in f1], 0), 4))]}\n"
+              f"{[i for i in zip(PUNC, np.round(np.nanmean([i[1] for i in f1], 0), 4))]}\n"
               f"for capitals :     {np.round(np.nanmean([i[2] for i in f1], 0), 4)}\n"
               f"for line breaks:   {np.round(np.nanmean([i[3] for i in f1], 0), 4)}")
         if self.log:
             logging.info("#############################################################")
-            logging.info(f"Test Accuracy: {np.round(np.nanmean(accuracy, 0), 4)}")
-            logging.info(f"Test f1-score for (before, after) the following classes\n"
-                  f"{punc} is:\n"
-                  f"{[i for i in zip(punc, np.round(np.nanmean([i[0] for i in f1], 0), 4))]}\n"
-                  f"{[i for i in zip(punc, np.round(np.nanmean([i[1] for i in f1], 0), 4))]}\n"
+            logging.info(f"{'Val' if val else 'Test'} Accuracy: {np.round(np.nanmean(accuracy, 0), 4)}")
+            logging.info(f"{'Val' if val else 'Test'} f1-score for (before, after) the following classes\n"
+                  f"{PUNC} is:\n"
+                  f"{[i for i in zip(PUNC, np.round(np.nanmean([i[0] for i in f1], 0), 4))]}\n"
+                  f"{[i for i in zip(PUNC, np.round(np.nanmean([i[1] for i in f1], 0), 4))]}\n"
                   f"for capitals :     {np.round(np.nanmean([i[2] for i in f1], 0), 4)}\n"
                   f"for line breaks:   {np.round(np.nanmean([i[3] for i in f1], 0), 4)}")
 
